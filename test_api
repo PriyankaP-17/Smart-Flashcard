@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""
+Test script for Smart Flashcard System API
+Run this script to test the API endpoints
+"""
+
+import requests
+import json
+import time
+
+# API base URL
+BASE_URL = "http://localhost:5000"
+
+# Test data
+test_flashcards = [
+    {
+        "student_id": "stu001",
+        "question": "What is Newton's Second Law?",
+        "answer": "Force equals mass times acceleration (F = ma)"
+    },
+    {
+        "student_id": "stu001", 
+        "question": "What is photosynthesis?",
+        "answer": "The process by which plants convert sunlight, water, and carbon dioxide into glucose and oxygen"
+    },
+    {
+        "student_id": "stu002",
+        "question": "What is the derivative of x²?",
+        "answer": "2x"
+    },
+    {
+        "student_id": "stu001",
+        "question": "What are the products of cellular respiration?",
+        "answer": "ATP, water, and carbon dioxide"
+    },
+    {
+        "student_id": "stu002",
+        "question": "Who wrote Romeo and Juliet?",
+        "answer": "William Shakespeare"
+    },
+    {
+        "student_id": "stu001",
+        "question": "What is the chemical formula for water?",
+        "answer": "H2O"
+    },
+    {
+        "student_id": "stu003",
+        "question": "What is a binary search algorithm?",
+        "answer": "An efficient algorithm for finding an item from a sorted list by repeatedly dividing the search interval in half"
+    },
+    {
+        "student_id": "stu002",
+        "question": "When did World War II end?",
+        "answer": "1945"
+    }
+]
+
+def test_health_check():
+    """Test the health check endpoint"""
+    print("🏥 Testing health check...")
+    try:
+        response = requests.get(f"{BASE_URL}/health")
+        if response.status_code == 200:
+            print("✅ Health check passed!")
+            print(f"   Response: {response.json()}")
+        else:
+            print(f"❌ Health check failed: {response.status_code}")
+        return response.status_code == 200
+    except requests.exceptions.ConnectionError:
+        print("❌ Cannot connect to server. Make sure the server is running!")
+        return False
+
+def test_add_flashcards():
+    """Test adding flashcards"""
+    print("\n📝 Testing flashcard addition...")
+    added_cards = []
+    
+    for i, flashcard in enumerate(test_flashcards):
+        try:
+            response = requests.post(f"{BASE_URL}/flashcard", json=flashcard)
+            if response.status_code == 201:
+                result = response.json()
+                print(f"✅ Flashcard {i+1} added successfully!")
+                print(f"   Subject classified as: {result['subject']}")
+                print(f"   Question: {flashcard['question'][:50]}...")
+                added_cards.append(result)
+            else:
+                print(f"❌ Failed to add flashcard {i+1}: {response.status_code}")
+                print(f"   Error: {response.text}")
+        except Exception as e:
+            print(f"❌ Error adding flashcard {i+1}: {e}")
+    
+    return added_cards
+
+def test_get_subjects():
+    """Test getting available subjects"""
+    print("\n📚 Testing subjects retrieval...")
+    try:
+        response = requests.get(f"{BASE_URL}/subjects")
+        if response.status_code == 200:
+            result = response.json()
+            print("✅ Subjects retrieved successfully!")
+            print(f"   Available subjects: {result['subjects']}")
+            print(f"   Subject counts: {result['subject_counts']}")
+            return result['subjects']
+        else:
+            print(f"❌ Failed to get subjects: {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"❌ Error getting subjects: {e}")
+        return []
+
+def test_get_flashcards_by_subject(subjects):
+    """Test getting flashcards by subject"""
+    print("\n🔍 Testing flashcards retrieval by subject...")
+    
+    for subject in subjects[:3]:  # Test first 3 subjects
+        try:
+            response = requests.get(f"{BASE_URL}/flashcards/{subject}?limit=5")
+            if response.status_code == 200:
+                result = response.json()
+                print(f"✅ Retrieved {result['count']} flashcards for {subject}")
+                if result['flashcards']:
+                    print(f"   Sample question: {result['flashcards'][0]['question'][:50]}...")
+            else:
+                print(f"❌ Failed to get {subject} flashcards: {response.status_code}")
+        except Exception as e:
+            print(f"❌ Error getting {subject} flashcards: {e}")
+
+def test_get_mixed_flashcards():
+    """Test getting mixed flashcards"""
+    print("\n🎲 Testing mixed flashcards retrieval...")
+    try:
+        response = requests.get(f"{BASE_URL}/flashcards/mixed?limit=10")
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Retrieved {result['count']} mixed flashcards")
+            print(f"   Subjects included: {result['subjects_included']}")
+            if result['flashcards']:
+                print("   Sample flashcards:")
+                for i, card in enumerate(result['flashcards'][:3]):
+                    print(f"     {i+1}. [{card['subject']}] {card['question'][:40]}...")
+        else:
+            print(f"❌ Failed to get mixed flashcards: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Error getting mixed flashcards: {e}")
+
+def test_get_all_flashcards():
+    """Test getting all flashcards"""
+    print("\n📋 Testing all flashcards retrieval...")
+    try:
+        response = requests.get(f"{BASE_URL}/flashcards?limit=20")
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Retrieved {result['count']} total flashcards")
+            if result['flashcards']:
+                subjects = set(card['subject'] for card in result['flashcards'])
+                print(f"   Subjects represented: {list(subjects)}")
+        else:
+            print(f"❌ Failed to get all flashcards: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Error getting all flashcards: {e}")
+
+def test_student_specific_flashcards():
+    """Test getting flashcards for specific student"""
+    print("\n👨‍🎓 Testing student-specific flashcards...")
+    student_id = "stu001"
+    try:
+        response = requests.get(f"{BASE_URL}/flashcards?student_id={student_id}&limit=10")
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Retrieved {result['count']} flashcards for {student_id}")
+            if result['flashcards']:
+                subjects = set(card['subject'] for card in result['flashcards'])
+                print(f"   Student's subjects: {list(subjects)}")
+        else:
+            print(f"❌ Failed to get flashcards for {student_id}: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Error getting flashcards for {student_id}: {e}")
+
+def test_error_handling():
+    """Test API error handling"""
+    print("\n⚠️  Testing error handling...")
+    
+    # Test missing fields
+    try:
+        response = requests.post(f"{BASE_URL}/flashcard", json={"student_id": "test"})
+        if response.status_code == 400:
+            print("✅ Correctly handled missing fields error")
+        else:
+            print(f"❌ Expected 400 for missing fields, got {response.status_code}")
+    except Exception as e:
+        print(f"❌ Error testing missing fields: {e}")
+    
+    # Test invalid endpoint
+    try:
+        response = requests.get(f"{BASE_URL}/invalid-endpoint")
+        if response.status_code == 404:
+            print("✅ Correctly handled 404 error")
+        else:
+            print(f"❌ Expected 404 for invalid endpoint, got {response.status_code}")
+    except Exception as e:
+        print(f"❌ Error testing invalid endpoint: {e}")
+
+def run_comprehensive_test():
+    """Run all tests"""
+    print("🚀 Starting Smart Flashcard System API Tests")
+    print("=" * 50)
+    
+    # Check if server is running
+    if not test_health_check():
+        print("\n❌ Server is not running. Please start the server first!")
+        print("   Run: python app.py")
+        return
+    
+    # Run tests
+    test_add_flashcards()
+    time.sleep(1)  # Small delay between tests
+    
+    subjects = test_get_subjects()
+    time.sleep(1)
+    
+    if subjects:
+        test_get_flashcards_by_subject(subjects)
+        time.sleep(1)
+    
+    test_get_mixed_flashcards()
+    time.sleep(1)
+    
+    test_get_all_flashcards()
+    time.sleep(1)
+    
+    test_student_specific_flashcards()
+    time.sleep(1)
+    
+    test_error_handling()
+    
+    print("\n" + "=" * 50)
+    print("🎉 Test suite completed!")
+    print("\n💡 You can now test the API manually using:")
+    print("   - Postman")
+    print("   - curl commands")
+    print("   - Or any HTTP client")
+    print(f"\n🌐 API is running at: {BASE_URL}")
+
+if __name__ == "__main__":
+    run_comprehensive_test()

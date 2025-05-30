@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""
+Example usage of the Smart Flashcard System API
+This script demonstrates how to interact with the API programmatically
+"""
+
+import requests
+import json
+
+class FlashcardClient:
+    def __init__(self, base_url="http://localhost:5000"):
+        self.base_url = base_url
+    
+    def add_flashcard(self, student_id, question, answer):
+        """Add a new flashcard"""
+        data = {
+            "student_id": student_id,
+            "question": question,
+            "answer": answer
+        }
+        response = requests.post(f"{self.base_url}/flashcard", json=data)
+        return response.json() if response.status_code == 201 else None
+    
+    def get_flashcards_by_subject(self, subject, limit=10, student_id=None):
+        """Get flashcards for a specific subject"""
+        params = {"limit": limit}
+        if student_id:
+            params["student_id"] = student_id
+        
+        response = requests.get(f"{self.base_url}/flashcards/{subject}", params=params)
+        return response.json() if response.status_code == 200 else None
+    
+    def get_mixed_flashcards(self, limit=10, student_id=None):
+        """Get a mixed batch of flashcards"""
+        params = {"limit": limit}
+        if student_id:
+            params["student_id"] = student_id
+        
+        response = requests.get(f"{self.base_url}/flashcards/mixed", params=params)
+        return response.json() if response.status_code == 200 else None
+    
+    def get_subjects(self):
+        """Get all available subjects"""
+        response = requests.get(f"{self.base_url}/subjects")
+        return response.json() if response.status_code == 200 else None
+
+def main():
+    # Initialize client
+    client = FlashcardClient()
+    
+    print("🎓 Smart Flashcard System - Example Usage")
+    print("=" * 45)
+    
+    # Example flashcards to add
+    example_flashcards = [
+        {
+            "student_id": "student_001",
+            "question": "What is the speed of light in vacuum?",
+            "answer": "299,792,458 meters per second"
+        },
+        {
+            "student_id": "student_001",
+            "question": "What is the powerhouse of the cell?",
+            "answer": "Mitochondria"
+        },
+        {
+            "student_id": "student_002",
+            "question": "What is the integral of x²?",
+            "answer": "x³/3 + C"
+        },
+        {
+            "student_id": "student_001",
+            "question": "Who wrote 'To Kill a Mockingbird'?",
+            "answer": "Harper Lee"
+        }
+    ]
+    
+    # Add example flashcards
+    print("\n📝 Adding example flashcards...")
+    for i, card in enumerate(example_flashcards):
+        result = client.add_flashcard(
+            card["student_id"], 
+            card["question"], 
+            card["answer"]
+        )
+        if result:
+            print(f"✅ Added flashcard {i+1}: Subject classified as '{result['subject']}'")
+        else:
+            print(f"❌ Failed to add flashcard {i+1}")
+    
+    # Get available subjects
+    print("\n📚 Available subjects:")
+    subjects = client.get_subjects()
+    if subjects:
+        for subject, count in subjects["subject_counts"].items():
+            print(f"   • {subject}: {count} flashcards")
+    
+    # Get flashcards by subject
+    print("\n🔍 Getting Physics flashcards:")
+    physics_cards = client.get_flashcards_by_subject("Physics", limit=5)
+    if physics_cards and physics_cards["flashcards"]:
+        for card in physics_cards["flashcards"]:
+            print(f"   Q: {card['question']}")
+            print(f"   A: {card['answer']}\n")
+    else:
+        print("   No Physics flashcards found")
+    
+    # Get mixed flashcards
+    print("🎲 Getting mixed flashcards:")
+    mixed_cards = client.get_mixed_flashcards(limit=6)
+    if mixed_cards and mixed_cards["flashcards"]:
+        print(f"   Retrieved {mixed_cards['count']} cards from subjects: {mixed_cards['subjects_included']}")
+        for i, card in enumerate(mixed_cards["flashcards"], 1):
+            print(f"   {i}. [{card['subject']}] {card['question'][:50]}...")
+    else:
+        print("   No mixed flashcards found")
+    
+    # Get student-specific flashcards
+    print("\n👨‍🎓 Getting flashcards for student_001:")
+    student_cards = client.get_mixed_flashcards(limit=10, student_id="student_001")
+    if student_cards and student_cards["flashcards"]:
+        print(f"   Found {student_cards['count']} flashcards for student_001")
+        subjects = set(card["subject"] for card in student_cards["flashcards"])
+        print(f"   Student's subjects: {list(subjects)}")
+    else:
+        print("   No flashcards found for student_001")
+    
+    print("\n✨ Example usage completed!")
+    print("You can now use the FlashcardClient class in your own applications.")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except requests.exceptions.ConnectionError:
+        print("❌ Could not connect to the API server.")
+        print("   Make sure the server is running: python app.py")
+    except Exception as e:
+        print(f"❌ An error occurred: {e}")

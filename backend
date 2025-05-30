@@ -1,0 +1,368 @@
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+import re
+import sqlite3
+from collections import Counter
+import os
+from werkzeug.exceptions import BadRequest
+
+app = Flask(__name__)
+
+# Database configuration
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "flashcards.db")}'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# Database Models
+class Flashcard(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.String(50), nullable=False)
+    question = db.Column(db.Text, nullable=False)
+    answer = db.Column(db.Text, nullable=False)
+    subject = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'student_id': self.student_id,
+            'question': self.question,
+            'answer': self.answer,
+            'subject': self.subject,
+            'created_at': self.created_at.isoformat()
+        }
+
+class SubjectClassifier:
+    def __init__(self):
+        # Extended subject keywords for better classification
+        self.subject_keywords = {
+            'Physics': [
+                'newton', 'force', 'acceleration', 'velocity', 'momentum', 'energy', 'kinetic', 'potential',
+                'gravity', 'mass', 'weight', 'friction', 'wave', 'frequency', 'amplitude', 'light', 'sound',
+                'electricity', 'current', 'voltage', 'resistance', 'magnetic', 'atom', 'electron', 'proton',
+                'neutron', 'quantum', 'relativity', 'thermodynamics', 'heat', 'temperature', 'pressure',
+                'mechanics', 'optics', 'electromagnetic', 'radioactive', 'nuclear', 'particle', 'photon'
+            ],
+            'Chemistry': [
+                'molecule', 'atom', 'element', 'compound', 'reaction', 'acid', 'base', 'ph', 'ionic', 'covalent',
+                'periodic', 'electron', 'proton', 'neutron', 'bond', 'oxidation', 'reduction', 'catalyst',
+                'solution', 'solvent', 'solute', 'concentration', 'molar', 'organic', 'inorganic', 'carbon',
+                'hydrogen', 'oxygen', 'nitrogen', 'chemical', 'formula', 'equation', 'synthesis', 'decomposition',
+                'precipitation', 'crystallization', 'distillation', 'chromatography', 'spectroscopy'
+            ],
+            'Biology': [
+                'cell', 'dna', 'rna', 'gene', 'chromosome', 'protein', 'enzyme', 'photosynthesis', 'respiration',
+                'mitosis', 'meiosis', 'evolution', 'natural selection', 'adaptation', 'species', 'organism',
+                'bacteria', 'virus', 'plant', 'animal', 'ecosystem', 'biodiversity', 'habitat', 'food chain',
+                'metabolism', 'homeostasis', 'hormone', 'nervous system', 'circulatory', 'respiratory',
+                'digestive', 'immune', 'reproduction', 'genetics', 'heredity', 'mutation', 'allele'
+            ],
+            'Mathematics': [
+                'equation', 'function', 'derivative', 'integral', 'calculus', 'algebra', 'geometry', 'trigonometry',
+                'logarithm', 'exponential', 'polynomial', 'matrix', 'vector', 'probability', 'statistics',
+                'theorem', 'proof', 'prime', 'factorial', 'sequence', 'series', 'limit', 'infinity',
+                'coordinate', 'graph', 'slope', 'intercept', 'parabola', 'circle', 'triangle', 'rectangle',
+                'area', 'volume', 'perimeter', 'angle', 'degree', 'radian', 'sine', 'cosine', 'tangent'
+            ],
+            'History': [
+                'war', 'battle', 'empire', 'revolution', 'independence', 'constitution', 'democracy', 'monarchy',
+                'ancient', 'medieval', 'renaissance', 'industrial', 'civilization', 'culture', 'dynasty',
+                'treaty', 'alliance', 'colonization', 'migration', 'trade', 'slavery', 'abolition',
+                'world war', 'cold war', 'napoleon', 'caesar', 'alexander', 'cleopatra', 'gandhi',
+                'lincoln', 'washington', 'churchill', 'roosevelt', 'stalin', 'hitler', 'conquest'
+            ],
+            'Geography': [
+                'continent', 'country', 'capital', 'mountain', 'river', 'ocean', 'sea', 'desert', 'forest',
+                'climate', 'weather', 'precipitation', 'temperature', 'latitude', 'longitude', 'equator',
+                'hemisphere', 'tropics', 'polar', 'tectonic', 'earthquake', 'volcano', 'erosion',
+                'landform', 'plateau', 'valley', 'peninsula', 'island', 'archipelago', 'strait',
+                'population', 'urban', 'rural', 'migration', 'resources', 'agriculture', 'industry'
+            ],
+            'Literature': [
+                'novel', 'poem', 'poetry', 'author', 'writer', 'character', 'plot', 'theme', 'metaphor',
+                'simile', 'symbolism', 'irony', 'alliteration', 'rhyme', 'meter', 'verse', 'stanza',
+                'shakespeare', 'dickens', 'twain', 'hemingway', 'austen', 'tolkien', 'orwell',
+                'tragedy', 'comedy', 'drama', 'fiction', 'non-fiction', 'genre', 'narrative', 'prose'
+            ],
+            'Computer Science': [
+                'algorithm', 'programming', 'code', 'software', 'hardware', 'database', 'network', 'internet',
+                'computer', 'processor', 'memory', 'storage', 'operating system', 'application', 'web',
+                'html', 'css', 'javascript', 'python', 'java', 'c++', 'data structure', 'array', 'list',
+                'tree', 'graph', 'sorting', 'searching', 'recursion', 'loop', 'variable', 'function',
+                'object', 'class', 'inheritance', 'polymorphism', 'encryption', 'security', 'artificial intelligence'
+            ]
+        }
+    
+    def preprocess_text(self, text):
+        """Clean and preprocess text for classification"""
+        # Convert to lowercase and remove special characters
+        text = re.sub(r'[^a-zA-Z\s]', ' ', text.lower())
+        # Split into words
+        words = text.split()
+        return words
+    
+    def classify_subject(self, question, answer=""):
+        """Classify the subject based on question and answer text"""
+        # Combine question and answer for better classification
+        combined_text = f"{question} {answer}".lower()
+        words = self.preprocess_text(combined_text)
+        
+        # Count keyword matches for each subject
+        subject_scores = {}
+        
+        for subject, keywords in self.subject_keywords.items():
+            score = 0
+            for keyword in keywords:
+                # Count exact matches and partial matches
+                for word in words:
+                    if keyword in word or word in keyword:
+                        score += 1
+                        break  # Avoid double counting same word
+                
+                # Bonus for exact keyword match in original text
+                if keyword in combined_text:
+                    score += 2
+            
+            subject_scores[subject] = score
+        
+        # Find the subject with highest score
+        if subject_scores:
+            best_subject = max(subject_scores, key=subject_scores.get)
+            max_score = subject_scores[best_subject]
+            
+            # If no significant matches found, return General
+            if max_score == 0:
+                return "General"
+            
+            # Check if there's a clear winner (at least 50% more than second best)
+            sorted_scores = sorted(subject_scores.values(), reverse=True)
+            if len(sorted_scores) > 1 and sorted_scores[0] > 0:
+                if sorted_scores[0] >= sorted_scores[1] * 1.5:
+                    return best_subject
+                else:
+                    # If scores are too close, be more conservative
+                    if sorted_scores[0] >= 3:  # Threshold for confidence
+                        return best_subject
+            elif sorted_scores[0] >= 2:  # Single clear match
+                return best_subject
+            
+            return best_subject if max_score >= 2 else "General"
+        
+        return "General"
+
+# Initialize classifier
+classifier = SubjectClassifier()
+
+@app.route('/flashcard', methods=['POST'])
+def add_flashcard():
+    try:
+        # Validate request data
+        if not request.json:
+            raise BadRequest("Request must contain JSON data")
+        
+        data = request.json
+        
+        # Check required fields
+        required_fields = ['student_id', 'question', 'answer']
+        for field in required_fields:
+            if field not in data or not data[field].strip():
+                raise BadRequest(f"Missing or empty required field: {field}")
+        
+        student_id = data['student_id'].strip()
+        question = data['question'].strip()
+        answer = data['answer'].strip()
+        
+        # Validate field lengths
+        if len(student_id) > 50:
+            raise BadRequest("student_id too long (max 50 characters)")
+        if len(question) > 1000:
+            raise BadRequest("question too long (max 1000 characters)")
+        if len(answer) > 1000:
+            raise BadRequest("answer too long (max 1000 characters)")
+        
+        # Classify subject
+        subject = classifier.classify_subject(question, answer)
+        
+        # Create and save flashcard
+        flashcard = Flashcard(
+            student_id=student_id,
+            question=question,
+            answer=answer,
+            subject=subject
+        )
+        
+        db.session.add(flashcard)
+        db.session.commit()
+        
+        return jsonify({
+            "message": "Flashcard added successfully",
+            "subject": subject,
+            "flashcard_id": flashcard.id
+        }), 201
+        
+    except BadRequest as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/flashcards/<subject>', methods=['GET'])
+def get_flashcards_by_subject(subject):
+    try:
+        # Get query parameters
+        limit = request.args.get('limit', 10, type=int)
+        student_id = request.args.get('student_id')
+        
+        # Validate limit
+        if limit <= 0 or limit > 100:
+            return jsonify({"error": "Limit must be between 1 and 100"}), 400
+        
+        # Build query
+        query = Flashcard.query.filter_by(subject=subject)
+        
+        if student_id:
+            query = query.filter_by(student_id=student_id)
+        
+        # Get flashcards with limit
+        flashcards = query.order_by(Flashcard.created_at.desc()).limit(limit).all()
+        
+        return jsonify({
+            "subject": subject,
+            "count": len(flashcards),
+            "flashcards": [flashcard.to_dict() for flashcard in flashcards]
+        })
+        
+    except Exception as e:
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/flashcards', methods=['GET'])
+def get_all_flashcards():
+    try:
+        # Get query parameters
+        limit = request.args.get('limit', 10, type=int)
+        student_id = request.args.get('student_id')
+        
+        # Validate limit
+        if limit <= 0 or limit > 100:
+            return jsonify({"error": "Limit must be between 1 and 100"}), 400
+        
+        # Build query
+        query = Flashcard.query
+        
+        if student_id:
+            query = query.filter_by(student_id=student_id)
+        
+        # Get flashcards with limit
+        flashcards = query.order_by(Flashcard.created_at.desc()).limit(limit).all()
+        
+        return jsonify({
+            "count": len(flashcards),
+            "flashcards": [flashcard.to_dict() for flashcard in flashcards]
+        })
+        
+    except Exception as e:
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/subjects', methods=['GET'])
+def get_subjects():
+    try:
+        # Get unique subjects from database
+        subjects = db.session.query(Flashcard.subject).distinct().all()
+        subject_list = [s[0] for s in subjects]
+        
+        # Get count for each subject
+        subject_counts = {}
+        for subject in subject_list:
+            count = Flashcard.query.filter_by(subject=subject).count()
+            subject_counts[subject] = count
+        
+        return jsonify({
+            "subjects": subject_list,
+            "subject_counts": subject_counts
+        })
+        
+    except Exception as e:
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/flashcards/mixed', methods=['GET'])
+def get_mixed_flashcards():
+    try:
+        # Get query parameters
+        limit = request.args.get('limit', 10, type=int)
+        student_id = request.args.get('student_id')
+        
+        # Validate limit
+        if limit <= 0 or limit > 100:
+            return jsonify({"error": "Limit must be between 1 and 100"}), 400
+        
+        # Get all available subjects
+        subjects_query = db.session.query(Flashcard.subject).distinct()
+        if student_id:
+            subjects_query = subjects_query.filter_by(student_id=student_id)
+        
+        subjects = [s[0] for s in subjects_query.all()]
+        
+        if not subjects:
+            return jsonify({
+                "count": 0,
+                "flashcards": [],
+                "message": "No flashcards found"
+            })
+        
+        # Calculate how many cards to get from each subject
+        cards_per_subject = max(1, limit // len(subjects))
+        remaining_cards = limit % len(subjects)
+        
+        mixed_flashcards = []
+        
+        for i, subject in enumerate(subjects):
+            # Get base number of cards + 1 extra for first few subjects if there's remainder
+            subject_limit = cards_per_subject + (1 if i < remaining_cards else 0)
+            
+            query = Flashcard.query.filter_by(subject=subject)
+            if student_id:
+                query = query.filter_by(student_id=student_id)
+            
+            subject_cards = query.order_by(Flashcard.created_at.desc()).limit(subject_limit).all()
+            mixed_flashcards.extend(subject_cards)
+        
+        # Shuffle the mixed flashcards for better distribution
+        import random
+        random.shuffle(mixed_flashcards)
+        
+        # Limit to requested amount
+        mixed_flashcards = mixed_flashcards[:limit]
+        
+        return jsonify({
+            "count": len(mixed_flashcards),
+            "flashcards": [flashcard.to_dict() for flashcard in mixed_flashcards],
+            "subjects_included": subjects
+        })
+        
+    except Exception as e:
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "healthy", "message": "Smart Flashcard API is running"})
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify({"error": "Method not allowed"}), 405
+
+# Initialize database
+def init_db():
+    with app.app_context():
+        db.create_all()
+        print("Database initialized successfully!")
+
+if __name__ == '__main__':
+    init_db()
+    app.run(debug=True, host='0.0.0.0', port=5000)
